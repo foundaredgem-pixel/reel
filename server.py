@@ -492,35 +492,54 @@ def graph_post(j, video, cover, cap, reply=None):
     return str(d["id"])
 
 
-def dm_reply(recipient, text):
+def dm_reply(recipient,text):
     if not recipient or not IG_ACCESS_TOKEN or not IG_USER_ID:
-        return
+        print(
+            "DM_REPLY_SKIPPED: missing recipient or Instagram credentials",
+            flush=True,
+        )
+        return False
 
     base=f"https://graph.instagram.com/{IG_API_VERSION}"
 
-    r=requests.post(
-        f"{base}/{IG_USER_ID}/messages",
-        json={
-            "recipient":{
-                "id":recipient
+    try:
+        r=requests.post(
+            f"{base}/{IG_USER_ID}/messages",
+            json={
+                "recipient":{
+                    "id":recipient
+                },
+                "message":{
+                    "text":text[:1000]
+                },
             },
-            "message":{
-                "text":text[:1000]
+            params={
+                "access_token":IG_ACCESS_TOKEN
             },
-        },
-        params={
-            "access_token":IG_ACCESS_TOKEN
-        },
-        timeout=60,
-    )
+            timeout=60,
+        )
+    except Exception as e:
+        print(
+            f"DM_REPLY_EXCEPTION={type(e).__name__}: {e}",
+            flush=True,
+        )
+        return False
 
     if r.status_code>=400:
         print(
-            "Instagram DM reply failed:",
+            "DM_REPLY_FAILED=HTTP",
             r.status_code,
-            r.text[:500],
+            r.text[:1000],
             flush=True,
         )
+        return False
+
+    print(
+        f"DM_REPLY_SENT recipient={recipient} "
+        f"message={text[:200]!r}",
+        flush=True,
+    )
+    return True
 
 
 def cleanup(p, delay):
@@ -531,7 +550,7 @@ def cleanup(p, delay):
     )
 
 
-def process(j, url, cap, base, reply=None):
+def process(j,url,cap,base,reply=None):
     global manual_active_job
 
     d=MEDIA/j
@@ -641,6 +660,11 @@ def process(j, url, cap, base, reply=None):
             message=msg,
         )
 
+        print(
+            f"JOB_FAILED id={j} error={e}",
+            flush=True,
+        )
+
         if reply:
             dm_reply(
                 reply,
@@ -691,27 +715,44 @@ threading.Thread(
 
 
 def find_url(o):
-    if isinstance(o,dict):
-        for k,v in o.items():
-            if (
-                isinstance(v,str)
-                and k.lower()
-                in {"url","link","media_url"}
-                and "instagram.com/" in v.lower()
-            ):
-                return v
+    candidates=[]
 
-            z=find_url(v)
+    def walk(v):
+        if isinstance(v,dict):
+            for value in v.values():
+                walk(value)
 
-            if z:
-                return z
+        elif isinstance(v,list):
+            for value in v:
+                walk(value)
 
-    elif isinstance(o,list):
-        for v in o:
-            z=find_url(v)
+        elif isinstance(v,str):
+            if "instagram.com/" in v.lower():
+                candidates.append(
+                    v.strip()
+                )
 
-            if z:
-                return z
+    walk(o)
+
+    for s in candidates:
+        m=re.search(
+            r"https?://(?:www\.)?instagram\.com/(?:reel|reels)/[A-Za-z0-9_-]+(?:\?[^\s\"'<>]*)?",
+            s,
+            re.I,
+        )
+
+        if m:
+            return m.group(0)
+
+    for s in candidates:
+        m=re.search(
+            r"https?://(?:www\.)?instagram\.com/[^\s\"'<>]+",
+            s,
+            re.I,
+        )
+
+        if m and reel_url(m.group(0)):
+            return m.group(0)
 
     return None
 
@@ -719,9 +760,23 @@ def find_url(o):
 def webhook_handle(p):
     base=public_url()
 
+    print(
+        "WEBHOOK_EVENT="
+        +json.dumps(
+            p,
+            ensure_ascii=False,
+            separators=(",",":"),
+        )[:8000],
+        flush=True,
+    )
+
     for e in p.get("entry",[]):
         for ev in e.get("messaging",[]):
-            m=ev.get("message",{})
+
+            m=ev.get(
+                "message",
+                {},
+            )
 
             if (
                 not isinstance(m,dict)
@@ -736,33 +791,54 @@ def webhook_handle(p):
                 )
             ).strip()
 
-            if not APPROVED_SENDER_IDS:
-                if sender:
-                    print(
-                        f"DISCOVERED_SENDER_ID={sender}",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        "WEBHOOK_EVENT_WITHOUT_SENDER="
-                        +json.dumps(
-                            ev,
-                            ensure_ascii=False,
-                        )[:4000],
-                        flush=True,
-                    )
+            print(
+                f"WEBHOOK_MESSAGE "
+                f"sender={sender or 'MISSING'} "
+                f"approved={sender in APPROVED_SENDER_IDS} "
+                f"message_keys={list(m.keys())}",
+                flush=True,
+            )
 
+            if not sender:
+                print(
+                    "WEBHOOK_NO_SENDER",
+                    flush=True,
+                )
                 continue
 
-            if (
-                not sender
-                or sender not in APPROVED_SENDER_IDS
-            ):
+            if sender not in APPROVED_SENDER_IDS:
+                print(
+                    f"REJECTED_SENDER_ID={sender}",
+                    flush=True,
+                )
                 continue
+
+            dm_reply(
+                sender,
+                "📩 Message received. Checking for an Instagram Reel…",
+            )
 
             u=find_url(m)
 
-            if not u or not reel_url(u):
+            print(
+                f"WEBHOOK_DETECTED_URL={u or 'NONE'}",
+                flush=True,
+            )
+
+            if not u:
+                dm_reply(
+                    sender,
+                    "⚠️ I received your message, but I couldn't detect an Instagram Reel link. "
+                    "Please send/share the Reel directly to this account.",
+                )
+                continue
+
+            if not reel_url(u):
+                dm_reply(
+                    sender,
+                    "⚠️ I received the shared Instagram post, but it is not a Reel. "
+                    "Please send a Reel.",
+                )
                 continue
 
             j=uuid.uuid4().hex[:16]
@@ -782,6 +858,14 @@ def webhook_handle(p):
                 "📋 Reel received and added to the queue.",
             )
 
+            print(
+                f"REEL_QUEUED "
+                f"job={j} "
+                f"sender={sender} "
+                f"url={u}",
+                flush=True,
+            )
+
             dm_queue.put(
                 (
                     j,
@@ -793,7 +877,8 @@ def webhook_handle(p):
 
 
 @app.get("/webhooks/instagram")
-def verify(request: Request):
+def verify(request:Request):
+
     if not WEBHOOK_VERIFY_TOKEN:
         raise HTTPException(
             503,
@@ -823,8 +908,20 @@ def verify(request: Request):
 
 
 @app.post("/webhooks/instagram")
-async def webhook(request: Request):
-    p=await request.json()
+async def webhook(request:Request):
+
+    try:
+        p=await request.json()
+
+    except Exception:
+        print(
+            "WEBHOOK_INVALID_JSON",
+            flush=True,
+        )
+
+        return {
+            "ok":True
+        }
 
     if isinstance(p,dict):
         webhook_handle(p)
@@ -878,7 +975,8 @@ def config():
 
 
 @app.get("/media/{job_id}/reel.mp4")
-def media(job_id: str):
+def media(job_id:str):
+
     p=MEDIA/job_id/"reel.mp4"
 
     if not p.exists():
@@ -898,9 +996,10 @@ def media(job_id: str):
 
 @app.post("/api/post")
 def post(
-    payload: PostRequest,
-    request: Request,
+    payload:PostRequest,
+    request:Request,
 ):
+
     global manual_active_job
 
     if not valid_url(payload.reel_url):
@@ -928,6 +1027,7 @@ def post(
         )
 
     with jobs_lock:
+
         if (
             manual_active_job
             and jobs.get(
@@ -970,7 +1070,8 @@ def post(
 
 
 @app.get("/api/status/{job_id}")
-def status(job_id: str):
+def status(job_id:str):
+
     with jobs_lock:
         d=jobs.get(job_id)
 
