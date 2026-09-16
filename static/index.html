@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>💎 Insta Reel Poster</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #0b0b0d; color: #fff;
+    font-family: Arial, sans-serif; display: flex; justify-content: center;
+  }
+  .wrap { width: 100%; max-width: 560px; padding: 22px 16px 40px; }
+  .card {
+    background: #151518; border: 1px solid #2d2d33; border-radius: 18px;
+    padding: 20px; box-shadow: 0 12px 35px rgba(0,0,0,.35);
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  .sub { color: #aaa; font-size: 14px; margin-bottom: 18px; }
+  .cover { width: 100%; max-height: 280px; object-fit: contain; background: #fff;
+           border-radius: 14px; display: block; margin-bottom: 18px; }
+  label { display: block; font-weight: 700; margin: 15px 0 8px; }
+  input, textarea {
+    width: 100%; border: 1px solid #393940; border-radius: 13px;
+    background: #0c0c0f; color: #fff; padding: 13px; font-size: 16px; outline: none;
+  }
+  input:focus, textarea:focus { border-color: #777; }
+  textarea { min-height: 130px; resize: vertical; }
+  button {
+    width: 100%; margin-top: 18px; border: 0; border-radius: 13px;
+    padding: 16px; font-size: 17px; font-weight: 800; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  #status {
+    margin-top: 16px; padding: 14px; border-radius: 13px;
+    background: #0c0c0f; color: #ffb7b7; min-height: 20px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .note { color: #999; font-size: 13px; line-height: 1.5; margin-top: 16px; }
+  .success { color: #b9ffbd !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>💎 Insta Reel Poster</h1>
+    <div class="sub">Paste a Reel link, enter a caption, then press Enter or tap POST REEL.</div>
+
+    <img class="cover" src="/cover.jpg" alt="Fixed cover image">
+
+    <label for="url">Instagram Reel link</label>
+    <input id="url" type="url" placeholder="https://www.instagram.com/reel/..." autocomplete="off">
+
+    <label for="caption">Caption</label>
+    <textarea id="caption" placeholder="Write your caption..."></textarea>
+
+    <div id="keyWrap" hidden>
+      <label for="appKey">App key</label>
+      <input id="appKey" type="password" placeholder="Enter your app key" autocomplete="off">
+    </div>
+
+    <button id="post">POST REEL</button>
+    <div id="status" hidden></div>
+
+    <div class="note">
+      The server keeps your Instagram credentials. Do not put an Instagram access token in this page.
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const postButton = $("post");
+const statusBox = $("status");
+
+function showStatus(text, success=false) {
+  statusBox.hidden = false;
+  statusBox.textContent = text;
+  statusBox.classList.toggle("success", success);
+}
+
+async function readResponse(response) {
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) {}
+  if (!response.ok) {
+    const detail = data?.detail || data?.message || text || `HTTP ${response.status}`;
+    throw new Error(detail.replace(/<[^>]*>/g, "").trim());
+  }
+  if (!data) throw new Error(`Server returned an invalid response (HTTP ${response.status}).`);
+  return data;
+}
+
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config", {cache: "no-store"});
+    const data = await readResponse(response);
+    $("keyWrap").hidden = !data.app_key_required;
+  } catch (e) {
+    showStatus("Could not load app configuration: " + e.message);
+  }
+}
+
+async function startPost() {
+  const reel_url = $("url").value.trim();
+  const caption = $("caption").value.trim();
+  const app_key = $("appKey").value;
+
+  if (!reel_url) return showStatus("Paste an Instagram Reel link first.");
+  if (!/^https?:\/\/(www\.)?instagram\.com\/(reel|reels|p)\//i.test(reel_url)) {
+    return showStatus("Please enter an Instagram Reel URL.");
+  }
+
+  postButton.disabled = true;
+  showStatus("Starting…");
+
+  try {
+    const response = await fetch("/api/post", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({reel_url, caption, app_key})
+    });
+    const data = await readResponse(response);
+    const jobId = data.job_id;
+
+    let finished = false;
+    while (!finished) {
+      await new Promise(r => setTimeout(r, 2000));
+      const statusResponse = await fetch(`/api/status/${encodeURIComponent(jobId)}`, {cache: "no-store"});
+      const statusData = await readResponse(statusResponse);
+      showStatus(statusData.message || statusData.status || "Working…", statusData.status === "done");
+
+      if (statusData.status === "done") {
+        finished = true;
+      } else if (statusData.status === "error") {
+        throw new Error(statusData.message || "The job failed.");
+      }
+    }
+  } catch (e) {
+    showStatus("❌ " + e.message);
+  } finally {
+    postButton.disabled = false;
+  }
+}
+
+postButton.addEventListener("click", startPost);
+$("caption").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    startPost();
+  }
+});
+loadConfig();
+</script>
+</body>
+</html>
