@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>💎 Insta Reel Poster</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0b0d;color:#fff;min-height:100vh}
+.wrap{max-width:520px;margin:auto;padding:24px 18px 40px}.card{background:#151518;border:1px solid #29292e;border-radius:24px;padding:22px;box-shadow:0 16px 50px #0008}
+h1{font-size:28px;margin:0 0 6px}.sub{color:#aaa;margin:0 0 22px}label{display:block;font-weight:700;margin:16px 0 8px}
+input,textarea{width:100%;background:#0d0d10;color:#fff;border:1px solid #33343a;border-radius:14px;padding:14px;font-size:16px;outline:none}
+textarea{min-height:150px;resize:vertical}input:focus,textarea:focus{border-color:#888}
+button{width:100%;border:0;border-radius:14px;padding:15px;font-size:17px;font-weight:800;margin-top:18px;cursor:pointer}
+button:disabled{opacity:.5}.status{margin-top:18px;padding:14px;border-radius:14px;background:#0d0d10;color:#ddd;min-height:50px;white-space:pre-wrap}
+.cover{display:block;width:100%;max-height:220px;object-fit:contain;background:#fff;border-radius:16px;margin:16px 0}
+.small{font-size:13px;color:#8f8f96;margin-top:14px;line-height:1.5}
+.success{color:#9ff0ad}.error{color:#ff9a9a}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+<h1>💎 Insta Reel Poster</h1>
+<p class="sub">Paste a Reel, write a caption, press Enter.</p>
+<img class="cover" src="/cover.jpg" alt="Fixed cover">
+<form id="form">
+<label for="url">Instagram Reel link</label>
+<input id="url" type="url" placeholder="https://www.instagram.com/reel/..." required autocomplete="off">
+<label for="caption">Caption</label>
+<textarea id="caption" placeholder="Write your caption..."></textarea>
+<div id="keyWrap" hidden>
+<label for="key">App key</label>
+<input id="key" type="password" placeholder="Your private app key" autocomplete="off">
+</div>
+<button id="submit" type="submit">POST REEL</button>
+</form>
+<div id="status" class="status">Ready.</div>
+<p class="small">The server keeps your Instagram credentials. Do not put an Instagram access token in this page.</p>
+</div></div>
+<script>
+const form=document.getElementById('form'), url=document.getElementById('url'),
+caption=document.getElementById('caption'), key=document.getElementById('key'),
+keyWrap=document.getElementById('keyWrap'), btn=document.getElementById('submit'),
+statusBox=document.getElementById('status');
+
+async function init(){
+  try{
+    const r=await fetch('/api/config'); const c=await r.json();
+    keyWrap.hidden=!c.app_key_required;
+  }catch(e){}
+}
+function show(text, cls=''){statusBox.textContent=text;statusBox.className='status '+cls}
+form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(btn.disabled)return;
+  btn.disabled=true; show('Starting…');
+  try{
+    const r=await fetch('/api/post',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({reel_url:url.value.trim(),caption:caption.value,app_key:key.value})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Could not start the job.');
+    let job=data.job_id;
+    const timer=setInterval(async()=>{
+      try{
+        const s=await fetch('/api/status/'+encodeURIComponent(job)); const j=await s.json();
+        show(j.message||j.status);
+        if(j.status==='done'){clearInterval(timer);show('✅ Reel posted successfully!','success');btn.disabled=false;}
+        if(j.status==='error'){clearInterval(timer);show('❌ '+j.message,'error');btn.disabled=false;}
+      }catch(err){clearInterval(timer);show('❌ '+err.message,'error');btn.disabled=false;}
+    },2000);
+  }catch(err){show('❌ '+err.message,'error');btn.disabled=false;}
+});
+caption.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+init();
+</script>
+</body>
+</html>
