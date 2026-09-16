@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: insta-reel-poster
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: IG_USER_ID
+        sync: false
+      - key: IG_API_VERSION
+        value: v26.0
+      - key: APP_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: INSTAGRAM_COOKIES_B64
+        sync: false
+      - key: WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: APPROVED_SENDER_IDS
+        sync: false
