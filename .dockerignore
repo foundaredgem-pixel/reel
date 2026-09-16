@@ -1,8 +1,0 @@
-.git/
-.github/
-__pycache__/
-*.pyc
-.env
-media/*
-!media/.gitkeep
-README.md
